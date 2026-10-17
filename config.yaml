@@ -1,0 +1,92 @@
+# Global experiment configuration.
+
+environment:
+  # Environment model used in the current baseline.
+  type: bernoulli
+  # True Bernoulli reward probabilities for the arms.
+  # The current correctness metrics assume a unique best arm.
+  means: [0.2, 0.4, 0.5, 0.6, 0.8]
+
+experiment:
+  # Number of decision steps in each independent run.
+  horizon: 2000
+  # Number of independent runs used for across-run statistics.
+  n_runs: 1000
+  # Master random seed used to generate reproducible run seeds.
+  seed: 42
+  # Root directory for all experiment outputs.
+  output_dir: results
+  # Single experiment folder created under output_dir.
+  experiment_name: experiment
+  # Save one detailed CSV row per run and time step.
+  save_step_records: true
+  # Remove the previous results/<experiment_name> directory before a new run
+  # so renamed/removed plots cannot remain as stale duplicate files.
+  clear_previous_results: true
+
+entropy:
+  # Fraction of initial entropy used to define entropy half-life.
+  half_life_fraction: 0.5
+
+belief_observer:
+  # Common Beta prior alpha used for every arm in the external observer.
+  alpha_prior: 1.0
+  # Common Beta prior beta used for every arm in the external observer.
+  beta_prior: 1.0
+  # Monte Carlo draws used to estimate q_t(a)=P(A*=a | F_t).
+  # Larger values reduce Monte Carlo noise but increase runtime.
+  optimal_arm_probability_samples: 128
+  # A run is called belief-confident below this normalized entropy level.
+  confident_entropy_threshold_normalized: 0.20
+  # A confident run is called wrong below this posterior mass on the true arm.
+  wrong_correctness_threshold: 0.20
+
+algorithms:
+  - name: greedy
+    label: Greedy
+
+  - name: epsilon_greedy
+    label: Epsilon-Greedy (constant)
+    # Probability of uniform random exploration.
+    epsilon: 0.10
+    # Exploration schedule: constant or inverse_sqrt.
+    schedule: constant
+    # Lower bound used only by decaying schedules.
+    min_epsilon: 0.0
+
+  - name: epsilon_greedy
+    label: Epsilon-Greedy (decaying)
+    # Initial exploration scale for the inverse-square-root schedule.
+    epsilon: 1.0
+    # Exploration schedule: constant or inverse_sqrt.
+    schedule: inverse_sqrt
+    # Minimum exploration probability after decay.
+    min_epsilon: 0.01
+
+  - name: ucb1
+    label: UCB1
+    # Coefficient c in sqrt(c * log(t) / N_a).
+    exploration_coefficient: 2.0
+
+  - name: thompson_sampling
+    label: Thompson Sampling
+    # Beta prior alpha used by Thompson Sampling itself.
+    alpha_prior: 1.0
+    # Beta prior beta used by Thompson Sampling itself.
+    beta_prior: 1.0
+    # Monte Carlo draws used only to estimate the TS policy vector for entropy.
+    policy_probability_samples: 128
+
+  - name: exp3
+    label: EXP3
+    # EXP3 exploration/mixing parameter.
+    gamma: 0.07
+
+research_metrics:
+  # Small support floor used only for the finite/smoothed KL policy-path
+  # diagnostic. Exact KL is also retained separately and may be infinite when
+  # deterministic policies change support.
+  policy_kl_probability_floor: 1.0e-12
+  # Avoid unstable regret / entropy-reduction ratios before entropy has moved.
+  # Ratio values are intentionally omitted (NaN) while ΔH <= this threshold.
+  entropy_efficiency_minimum_reduction: 0.05
