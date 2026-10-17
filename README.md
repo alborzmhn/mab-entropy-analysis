@@ -1,277 +1,134 @@
-# MAB Entropy Research Codebase
+# Understanding Exploration in Multi-Armed Bandits Through Entropy
 
-This project compares stochastic multi-armed bandit algorithms through regret,
-action entropy, best-arm belief entropy, policy-belief alignment, and the
-research metrics proposed in the accompanying entropy-based MAB proposal.
+**Research codebase | Python | Multi-Armed Bandits | Information Theory**
 
-## Implemented algorithms
+How can we tell whether a bandit algorithm is still exploring, has become confident, or has committed to the wrong arm? Cumulative regret is important, but it does not describe the whole learning process.
 
-- Greedy
-- Epsilon-Greedy with constant epsilon
-- Epsilon-Greedy with inverse-square-root epsilon decay
-- UCB1
-- Thompson Sampling
-- EXP3
+This project compares multi-armed bandit algorithms using **regret, action entropy, uncertainty about the best arm, and changes in decision policies over time**. The goal is to study *how* algorithms learn, not only how much reward they collect.
 
-## Environment
+> **Status:** Ongoing research. This repository contains the experiment implementation and analysis tools. It does not claim a completed theoretical result or a published paper.
 
-The current baseline is a stationary Bernoulli bandit. The true arm means are
-configured in `config.yaml`.
+## Research questions
 
-## Existing measurement layers
+- How do exploration patterns differ between algorithms with different decision rules?
+- When does a policy become concentrated, and does that concentration reflect a correct belief about the best arm?
+- What can entropy reveal that cumulative regret alone does not?
+- How do policy changes, belief changes, and regret relate throughout learning?
 
-### 1. Evidence
+## Algorithms
 
-A common Beta-Bernoulli observer receives the same action/reward history
-produced by each algorithm. Before every decision it stores:
+The implementation supports six configurations:
 
-- number of observations per arm,
-- empirical reward means,
-- posterior means.
+| Algorithm | Decision strategy |
+| --- | --- |
+| Greedy | Selects an arm with the highest current estimated reward |
+| Epsilon-Greedy (constant) | Uses a fixed probability of random exploration |
+| Epsilon-Greedy (decaying) | Reduces exploration using an inverse-square-root schedule |
+| UCB1 | Selects arms using an upper confidence bound |
+| Thompson Sampling | Samples from Beta posterior distributions |
+| EXP3 | Uses exponential weights and randomized exploration |
 
-The observer does not affect the algorithm's decisions.
+The current environment is a **stationary Bernoulli bandit**. The default arm reward probabilities are `[0.2, 0.4, 0.5, 0.6, 0.8]`, with one unique best arm. The algorithms are evaluated under a shared experiment configuration.
 
-### 2. Belief about the optimal arm
+## What is measured?
 
-The common observer estimates
+### 1. Regret
 
-`q_t(a) = P(A* = a | F_t)`
+The experiment tracks cumulative pseudo-regret, which measures the expected reward lost by selecting arms other than the optimal one.
 
-by posterior Monte Carlo. From this distribution the code records:
+### 2. Three views of entropy
 
-- best-arm belief entropy,
-- normalized belief entropy,
-- posterior correctness: mass on the true optimal arm,
-- MAP best-arm accuracy,
-- confident-but-wrong probability.
+These quantities answer different questions and should not be treated as interchangeable.
 
-### 3. Policy
+| Measure | What it describes |
+| --- | --- |
+| **Conditional policy entropy** | How random the algorithm's next decision is, given its observed history |
+| **Marginal action entropy** | How variable the action distribution is across independent histories |
+| **Best-arm belief entropy** | How uncertain an external Bayesian observer is about which arm is optimal |
 
-Each algorithm exposes
+The code evaluates the action-entropy decomposition:
 
-`pi_t(a) = P(A_t = a | F_t)`.
-
-The code records conditional policy entropy for every run and averages it over
-histories/runs.
-
-### 4. Action across runs
-
-The marginal action distribution is estimated by averaging the per-run policy
-vectors:
-
-`P(A_t=a) = E_Ft[P(A_t=a | F_t)]`.
-
-The code also stores the empirical histogram of actually sampled actions as a
-diagnostic.
-
-### 5. Action entropy decomposition
-
-The code evaluates
-
-`H(A_t) = H(A_t | F_t) + I(A_t ; F_t)`.
-
-The mutual-information term measures history-induced action variability. It is
-not the same as information gained about the optimal arm.
-
-### 6. Policy-belief mismatch
-
-For each run and time step the code computes Jensen-Shannon divergence between
-`pi_t` and `q_t`. A normalized version lies in `[0, 1]`.
-
-For exact probability matching, Thompson Sampling has `pi_t = q_t` when its
-prior/model matches the observer. In finite Monte Carlo estimation the measured
-mismatch is expected to be small rather than exactly zero.
-
----
-
-# Proposal research metrics now implemented
-
-The following six proposal-driven analyses have been added.
-
-## 1. Entropy reduction and entropy-reduction efficiency
-
-For marginal action entropy `H_t`, the code computes
-
-`DeltaH_t = H_1 - H_t`.
-
-The proposal coefficient is operationalized using cumulative pseudo-regret:
-
-`eta_t = cumulative_pseudo_regret_t / DeltaH_t`.
-
-The saved field is named `regret_per_entropy_reduction` to avoid ambiguity.
-Under this interpretation, **lower is better**: the algorithm accumulated less
-regret per nat of action-entropy reduction.
-
-The ratio is stored as `NaN` while entropy reduction is numerically too small.
-The threshold is configurable through
-`research_metrics.entropy_efficiency_minimum_reduction`.
-
-## 2. Entropy dissipation rate
-
-The discrete dissipation rate is
-
-`D_t = H_{t-1} - H_t`,
-
-with `D_1 = 0`.
-
-Interpretation:
-
-- positive: entropy decreased,
-- zero: no change,
-- negative: entropy increased/reheated.
-
-Both raw and normalized marginal-action-entropy dissipation curves are saved.
-
-## 3. Action-entropy / regret phase diagram
-
-For every algorithm, the project now plots the trajectory
-
-`(H_t, R_t)`
-
-using normalized marginal action entropy and mean cumulative pseudo-regret.
-A cross-algorithm phase diagram is also generated so the trajectories can be
-compared as algorithmic fingerprints.
-
-## 4. Entropy-regret Pareto frontier
-
-At the common final horizon `T`, algorithms are compared with two objectives:
-
-- minimize final mean cumulative pseudo-regret,
-- maximize final action-entropy reduction.
-
-An algorithm is Pareto dominated when another algorithm has no larger regret
-and no smaller entropy reduction, with at least one strict improvement.
-
-The final comparison CSV contains
-`is_entropy_regret_pareto_efficient`, and the comparison folder contains a
-Pareto-frontier plot.
-
-## 5. Information-geometric policy path length and smoothness
-
-For each independent run, the conditional policy path is analyzed through
-
-`D_KL(pi_t || pi_{t-1})`.
-
-The first step is zero because no previous policy exists.
-
-Two versions are retained:
-
-1. **Exact KL**. This follows the mathematical definition directly. It may be
-   infinite when a deterministic policy changes support, which is expected for
-   algorithms such as Greedy or UCB.
-2. **Smoothed KL**. A very small probability floor is applied and the vector is
-   renormalized before KL is evaluated. This produces a finite diagnostic that
-   can be plotted and compared numerically.
-
-The exact cumulative path length and the smoothed cumulative path length are
-both saved. Smoothness is summarized by the average temporal standard deviation
-of the per-run smoothed KL step sizes: lower values mean more even movement over
-time.
-
-The smoothing floor is configured through
-`research_metrics.policy_kl_probability_floor`.
-
-## 6. Theoretical entropy / misidentification check
-
-The code defines
-
-`p_t = P(A_t != a*) = 1 - P(A_t = a*)`
-
-using the marginal action distribution.
-
-It compares observed marginal action entropy with the proposal curve
-
-`h(p_t) + p_t log(K-1)`
-
-and with the asymptotic signature
-
-`p_t log(1/p_t)`.
-
-The first expression is exact when the total suboptimal-action mass is uniform
-over the `K-1` suboptimal arms. In the general experiment it is therefore used
-as a proposal-motivated reference curve rather than silently treated as an
-identity.
-
-The project saves:
-
-- observed action entropy,
-- `p_t`,
-- proposal-predicted entropy,
-- asymptotic entropy approximation,
-- absolute errors,
-- RMSE for both approximations.
-
-## Important configuration
-
-All experiment-level parameters are defined in `config.yaml`.
-
-The belief observer section is:
-
-```yaml
-belief_observer:
-  alpha_prior: 1.0
-  beta_prior: 1.0
-  optimal_arm_probability_samples: 128
-  confident_entropy_threshold_normalized: 0.20
-  wrong_correctness_threshold: 0.20
+```text
+H(A_t) = H(A_t | F_t) + I(A_t ; F_t)
 ```
 
-The proposal-metric numerical settings are:
+Here, `F_t` is the history available before the decision at time `t`. The mutual-information term describes variation in actions across histories; it is **not** a measure of information gained about the optimal arm.
 
-```yaml
-research_metrics:
-  policy_kl_probability_floor: 1.0e-12
-  entropy_efficiency_minimum_reduction: 1.0e-12
-```
+### 3. Belief quality and policy–belief mismatch
 
-`optimal_arm_probability_samples` controls Monte Carlo accuracy for `q_t`.
-Increasing it reduces Monte Carlo noise but increases runtime.
+A common **Beta–Bernoulli observer** processes the action/reward history generated by each algorithm. It estimates the probability that each arm is optimal using posterior Monte Carlo sampling.
 
-The correctness metrics currently require a unique true optimal arm.
+The observer is used only for evaluation; it does not control the algorithms. The analysis includes:
 
-## Installation
+- Belief entropy and posterior mass on the true best arm
+- MAP best-arm accuracy and confident-but-wrong decisions
+- Jensen–Shannon divergence between the algorithm's policy and the observer's best-arm belief
 
-From the project directory:
+A low-entropy policy is not necessarily a correct policy. An agent may act confidently while favoring the wrong arm.
+
+### 4. Learning dynamics and research diagnostics
+
+The implementation also calculates:
+
+- **Entropy reduction and dissipation:** how action entropy changes over time
+- **Regret per entropy reduction:** a diagnostic ratio, omitted when the denominator is too small
+- **Entropy–regret trajectories:** phase plots showing how uncertainty and regret evolve together
+- **Pareto comparison:** final regret versus entropy reduction across algorithms
+- **Policy-path geometry:** exact and smoothed KL divergence between consecutive policies
+- **Entropy–misidentification comparisons:** observed action entropy compared with reference expressions based on the probability of selecting a suboptimal arm
+
+These are exploratory analysis tools. They should not all be interpreted as performance objectives, and the entropy–misidentification expressions are not general identities.
+
+## Getting started
+
+### Requirements
+
+- Python 3
+- Dependencies listed in [`requirements.txt`](requirements.txt)
+
+Clone the repository and create a virtual environment:
 
 ```bash
+git clone https://github.com/alborzmhn/mab-entropy-analysis.git
+cd mab-entropy-analysis
 python -m venv .venv
 ```
 
-Windows CMD:
+Activate it:
 
-```bat
-.venv\Scripts\activate
-```
-
-PowerShell:
-
+**Windows PowerShell**
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-Then install dependencies:
-
+**macOS / Linux**
 ```bash
-pip install -r requirements.txt
+source .venv/bin/activate
 ```
 
-## Run tests
+Install the dependencies:
 
 ```bash
-pytest -q
+python -m pip install -r requirements.txt
 ```
 
-The current codebase includes sanity tests for the algorithms, entropy metrics,
-belief metrics, experiment runner, proposal metrics, KL support changes, and
-Pareto dominance.
+Run the tests:
 
-## Run the experiment
+```bash
+python -m pytest -q
+```
+
+Run the experiment:
 
 ```bash
 python main.py
 ```
 
-For a quick sanity run, temporarily use something like:
+### Start with a smaller experiment
+
+The current [`config.yaml`](config.yaml) specifies **1,000 independent runs and 2,000 steps per run**, which can take considerable time because posterior Monte Carlo estimation is performed repeatedly.
+
+For a quick local check, change:
 
 ```yaml
 experiment:
@@ -279,117 +136,56 @@ experiment:
   n_runs: 20
 ```
 
-For larger runs, remember that the belief observer performs posterior Monte
-Carlo at every time step for every run and algorithm, so runtime grows
-substantially.
+Other experiment settings, including the random seed, algorithms, prior parameters, and output directory, are also controlled in `config.yaml`.
 
-## Output structure
+**Note:** The default `clear_previous_results: true` setting deletes the previous output directory for the configured experiment name before generating new results. Back up any results you want to keep before rerunning.
 
-All outputs stay under one experiment directory:
+## Repository structure
 
 ```text
-results/
-└── experiment/
-    ├── config.yaml
-    ├── algorithms/
-    │   ├── greedy/
-    │   │   ├── data/
-    │   │   │   ├── all_records.csv
-    │   │   │   └── summary.csv
-    │   │   └── plots/
-    │   │       ├── regret.png
-    │   │       ├── entropy_decomposition.png
-    │   │       ├── entropy_normalized.png
-    │   │       ├── belief_analysis.png
-    │   │       ├── policy_vs_belief_entropy.png
-    │   │       ├── policy_belief_mismatch.png
-    │   │       ├── belief_regret_phase.png
-    │   │       ├── entropy_reduction_efficiency.png
-    │   │       ├── entropy_dissipation.png
-    │   │       ├── action_entropy_regret_phase.png
-    │   │       ├── policy_kl_geometry.png
-    │   │       └── entropy_misidentification_theory.png
-    │   └── ...
-    └── comparisons/
-        ├── data/
-        │   └── final_algorithm_comparison.csv
-        └── plots/
-            ├── regret_comparison.png
-            ├── marginal_entropy_comparison.png
-            ├── belief_entropy_comparison.png
-            ├── belief_correctness_comparison.png
-            ├── policy_belief_mismatch_comparison.png
-            ├── entropy_efficiency_comparison.png
-            ├── entropy_dissipation_comparison.png
-            ├── action_entropy_regret_phase_comparison.png
-            ├── policy_kl_path_comparison.png
-            └── entropy_regret_pareto_frontier.png
+.
+├── main.py                       # Experiment entry point
+├── config.yaml                   # Algorithms, environment, and run settings
+├── requirements.txt
+├── regenerate_comparisons_without_greedy.py
+├── mab_entropy/
+│   ├── algorithms/              # Bandit decision rules
+│   ├── environments/            # Bernoulli bandit
+│   ├── experiments/             # Repeated-run experiment logic
+│   ├── metrics/                 # Entropy, regret, belief, research metrics
+│   ├── observers/               # External Beta–Bernoulli observer
+│   └── plotting/                # Per-algorithm and comparison figures
+└── tests/                       # Algorithm and metric tests
 ```
 
-## New columns in each algorithm's `summary.csv`
+## Generated results
 
-The time-resolved proposal metrics include:
+The experiment writes its outputs under `results/experiment/`:
 
-- `marginal_entropy_reduction`
-- `normalized_marginal_entropy_reduction`
-- `marginal_entropy_dissipation_rate`
-- `normalized_marginal_entropy_dissipation_rate`
-- `regret_per_entropy_reduction`
-- `action_misidentification_probability`
-- `proposal_predicted_action_entropy`
-- `asymptotic_predicted_action_entropy`
-- `proposal_entropy_absolute_error`
-- `asymptotic_entropy_absolute_error`
-- `mean_policy_step_kl_divergence`
-- `cumulative_mean_policy_kl_path_length`
-- `infinite_policy_step_kl_fraction`
-- `mean_smoothed_policy_step_kl_divergence`
-- `std_smoothed_policy_step_kl_divergence`
-- `cumulative_mean_smoothed_policy_kl_path_length`
+- `algorithms/<algorithm>/data/`: time-step records and summary CSVs
+- `algorithms/<algorithm>/plots/`: regret, entropy, belief, and policy figures
+- `comparisons/data/`: final cross-algorithm comparison
+- `comparisons/plots/`: comparative figures, including phase diagrams and the Pareto frontier
 
-## Interpretation reminders
+Generated CSV files and figures are **not committed** to this repository to keep it lightweight. Run `python main.py` to generate them locally.
 
-- Low policy entropy means deterministic/concentrated behavior; it does not
-  imply that the algorithm knows the correct arm.
-- Low belief entropy means posterior concentration; it does not by itself imply
-  correctness.
-- `belief_correctness` distinguishes confident-and-correct from
-  confident-but-wrong states.
-- Policy-belief mismatch is descriptive. UCB, Greedy, Epsilon-Greedy, and EXP3
-  are not designed to probability-match the Bayesian observer.
-- The common observer is an external evaluator for non-Bayesian algorithms,
-  not part of their decision rules.
-- A negative entropy dissipation value is not an error; it means entropy rose
-  from the previous step.
-- Exact KL can legitimately become infinite when a deterministic policy changes
-  support. Use the smoothed KL outputs for finite cross-algorithm plots, while
-  preserving exact KL for the mathematical diagnostic.
-- `p_t log(1/p_t)` is an asymptotic expression. It should not be expected to
-  match well when `p_t` is not yet small.
+## Implementation notes
 
-## Not implemented yet
+- The belief observer uses a common Beta prior across algorithms, but it is separate from their learning rules.
+- Thompson Sampling's policy is estimated through Monte Carlo sampling for entropy analysis.
+- Exact KL divergence may be infinite when a deterministic policy changes support; a smoothed version is saved separately for finite visualization.
+- UCB1's entropy-reduction reference starts after its forced initialization of all arms.
+- The current correctness measures assume a **unique optimal arm**.
+- The current baseline is **stationary**. Results from this environment should not be presented as evidence of performance under distribution shift.
 
-The next stage can add:
+## Limitations and next steps
 
-- KL-UCB,
-- sliding-window UCB,
-- nonstationary change-point environments and entropy reheating experiments,
-- difficulty sweeps over reward gaps and number of arms,
-- expected information gain,
-- Information-Directed Sampling,
-- deeper theoretical asymptotics and statistical confidence analysis.
+The project is an experimental research codebase, not a finished benchmark or publication. Planned extensions include nonstationary bandits, sliding-window methods, reward-gap sweeps, additional information-theoretic measures, and stronger statistical comparisons.
 
+These extensions would help investigate whether entropy-based diagnostics can reveal when an agent needs to explore again after the environment changes.
 
-## Plot cleanup in this revision
+## Author
 
-- Experiment defaults are now `n_runs: 100` and `horizon: 1000`.
-- The marginal-MAP correctness line was removed from the marginal-action analysis plot because it collapses the across-run distribution to a single 0/1 mode indicator and was visually uninformative in the baseline. The underlying metric remains in CSV outputs for reproducibility.
-- The regret / entropy-reduction ratio is omitted while marginal entropy reduction is `<= 0.05` nats to avoid unstable near-zero denominators; this rule is stated directly inside the efficiency figure.
-- Duplicate belief-regret and marginal/action-regret phase figures were removed. The three proposal phase diagrams now have one consistent naming family: policy, belief, and marginal entropy versus cumulative regret.
-- Raw and normalized action-entropy plots now use matching filenames: `action_entropy_decomposition_nats.png` and `action_entropy_decomposition_normalized.png`.
-- Phase-diagram start and end points are plotted separately and labeled `Start (t=1)` and `End (t=T)`.
-- Plot filenames, titles, legends, and axis labels were standardized for easier navigation.
-- `clear_previous_results: true` is enabled by default so old plot filenames do not remain after rerunning the experiment.
-
-## UCB1 entropy-reduction reference
-For UCB1, the first K pulls are deterministic forced initialization. The action-entropy reduction metric therefore uses the first genuine UCB decision (t = K + 1) as its reference instead of t = 1. Pre-reference reduction/efficiency values are saved as NaN. Other algorithms keep t = 1 as the reference. Regret-per-entropy-reduction for UCB1 is also measured from the same post-warm-up reference.
+**Alborz Mahmoudian**  
+B.Sc. Computer Engineering, University of Tehran  
+[GitHub](https://github.com/alborzmhn) · [LinkedIn](https://www.linkedin.com/in/alborz-mahmoudian-b70185335/)
